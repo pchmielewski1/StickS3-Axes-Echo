@@ -16,7 +16,7 @@ StickS3 Axes & Echo lives in this repository because it is the “bring-up / pro
 - **KEY1 / BtnA**
   - Click: cycle through a 16-color background palette
   - Tone: plays a short tone per color (black is silent)
-  - Hold (~650ms): calibrate IMU “zero/level” to the current pose
+  - Hold (~650ms): replay last recording (PLAY)
 
 - **KEY2 / BtnB**
   - Press + hold: start recording (a short beep plays first)

@@ -751,16 +751,22 @@ void loop() {
 
   // KEY1 / BtnA:
   // - short click: cycle background color (existing behavior)
-  // - long press: calibrate the IMU "level" (zero) to current pose
+  // - long press (~650ms): replay last recording (PLAY)
   static bool btnAHoldHandled = false;
-  if (imuOk && gUiMode == UiMode::Normal) {
+  if (gUiMode == UiMode::Normal) {
     if (M5.BtnA.isPressed()) {
       if (!btnAHoldHandled && M5.BtnA.pressedFor(650)) {
-        angle0Rad = readAccelAngleRad();
         btnAHoldHandled = true;
         gSkipNextBtnAClick = true;
 
-        playToneIfEnabled(880.0f, 60, false);
+        if (!gPlayActive && !gRecActive && !gRecReadyWaitRelease && gRecSamples > 0) {
+          ensureMicOff();
+          ensureSpeakerOn();
+          (void)startPlayback();
+        } else {
+          // No recording available (or busy) -> subtle error tone.
+          playToneIfEnabled(220.0f, 60, false);
+        }
 
         // Force redraw immediately.
         lastDrawMs = 0;
