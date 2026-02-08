@@ -49,7 +49,6 @@ static_assert(sizeof(kToneHz16) / sizeof(kToneHz16[0]) == kBgPaletteCount, "Tone
 static lgfx::LGFX_Sprite frameSpritePortrait;
 static lgfx::LGFX_Sprite frameSpriteLandscape;
 static uint8_t gDisplayRotation = 255; // unknown; 0=portrait, 1=landscape
-static float angle0Rad = 0.0f;
 static bool gSkipNextBtnAClick = false;
 static bool imuOk = false;
 static constexpr uint8_t kPortraitRotation = 0;
@@ -174,20 +173,12 @@ static void drawAxesScreen(float ax, float ay, float az) {
   s.drawString(line, 6, 62);
 
   s.setTextColor(TFT_LIGHTGREY, bgColor);
-  s.drawString("KEY1: color   HOLD KEY1: zero (optional)", 6, s.height() - 26);
+  s.drawString("KEY1: color   HOLD KEY1: PLAY", 6, s.height() - 26);
   s.drawString("KEY2: hold rec / release play", 6, s.height() - 14);
 
   M5.Display.startWrite();
   s.pushSprite(&M5.Display, 0, 0);
   M5.Display.endWrite();
-}
-
-static float readAccelAngleRad() {
-  float ax = 0.0f, ay = 0.0f, az = 0.0f;
-  (void)M5.Imu.update();
-  (void)M5.Imu.getAccel(&ax, &ay, &az);
-  (void)az;
-  return atan2f(ay, ax);
 }
 
 // --- Audio record/playback (KEY2 = M5.BtnB) ---
@@ -698,28 +689,6 @@ void setup() {
   setDisplayRotation(kPortraitRotation);
 
   imuOk = M5.Imu.isEnabled();
-  if (imuOk) {
-    // Capture a reference angle at boot.
-    // Best results if you boot holding the device "upright": USB-C down, GPIO up.
-    float axSum = 0.0f;
-    float aySum = 0.0f;
-    float azSum = 0.0f;
-    constexpr int samples = 20;
-    for (int i = 0; i < samples; ++i) {
-      (void)M5.Imu.update();
-      float ax = 0.0f, ay = 0.0f, az = 0.0f;
-      (void)M5.Imu.getAccel(&ax, &ay, &az);
-      axSum += ax;
-      aySum += ay;
-      azSum += az;
-      delay(10);
-    }
-    const float ax0 = axSum / samples;
-    const float ay0 = aySum / samples;
-    const float az0 = azSum / samples;
-    (void)az0;
-    angle0Rad = atan2f(ay0, ax0);
-  }
 
   // Full-screen frame buffer (double buffering) to prevent flicker/tearing.
   frameSpritePortrait.setColorDepth(16);
