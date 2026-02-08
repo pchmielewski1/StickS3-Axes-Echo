@@ -53,6 +53,17 @@ jobs:
           (cd dist && sha256sum * > SHA256SUMS.txt)
           (cd dist && zip -9 -r "sticks3-axes-echo-${GITHUB_REF_NAME}.zip" .)
 
+      - name: Prepare release notes
+        run: |
+          set -euo pipefail
+          NOTES="releases/${GITHUB_REF_NAME}.md"
+          if [ ! -f "$NOTES" ]; then
+            mkdir -p releases
+            cat > "$NOTES" <<'EOF'
+            Release notes were not provided for this tag.
+            EOF
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -62,4 +73,5 @@ jobs:
             dist/*.map
             dist/SHA256SUMS.txt
             dist/*.zip
-          generate_release_notes: true
+          body_path: releases/${{ github.ref_name }}.md
+          generate_release_notes: false
