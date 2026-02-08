@@ -26,7 +26,7 @@ StickS3 Axes & Echo lives in this repository because it is the “bring-up / pro
 ## UI modes
 
 - **Normal (portrait):** IMU axes + vector + text readouts.
-- **Status screens (landscape):** RECORD / HOLD / PLAY / ERROR screens with a small footer showing mic/speaker/buffer status.
+- **Status screens (landscape):** RECORD / HOLD / PLAY / ERROR screens with a small footer showing mic/speaker/buffer status. RECORD and PLAY also show a 16-band spectrum (vertical bars) updated from recent audio.
 
 ## Audio implementation notes (important)
 

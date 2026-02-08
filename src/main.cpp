@@ -207,6 +207,11 @@ static std::vector<uint8_t> gRecAdpcm;
 static bool gRecStartRequested = false;
 static bool gPlayActive = false;
 
+static constexpr size_t kRecSpectrumBins = 16;
+static uint8_t gRecSpectrum[kRecSpectrumBins] = {0};
+static float gRecSpectrumSmooth[kRecSpectrumBins] = {0.0f};
+static uint32_t gPlayStartMs = 0;
+
 enum class UiMode : uint8_t {
   Normal = 0,
   RecordBeep,
@@ -280,6 +285,7 @@ static bool startPlayback() {
   (void)imaAdpcmEncodeBuffer(gRecPcm, gRecSamples, gRecAdpcm);
   (void)imaAdpcmDecodeToBuffer(gRecAdpcm, gRecPcm, gRecSamples);
   (void)M5.Speaker.playRaw(gRecPcm, gRecSamples, kRecSampleRateHz, false, 1, -1, true);
+  gPlayStartMs = millis();
   gPlayActive = true;
   gUiMode = UiMode::Playing;
   return true;
@@ -304,7 +310,42 @@ static void drawImuDisabledScreen() {
   M5.Display.endWrite();
 }
 
-static void drawStatusScreen(const char* title, const char* line1, const char* line2, uint16_t accent) {
+static void drawSpectrumBarsVertical(lgfx::LGFX_Sprite& s, int x, int y, int w, int h, const uint8_t* bins, size_t binCount, uint16_t barColor, uint16_t bg) {
+  if (bins == nullptr || binCount == 0 || w <= 0 || h <= 0) {
+    return;
+  }
+
+  // Frame + clear area to current UI background.
+  s.drawRect(x, y, w, h, TFT_DARKGREY);
+  s.fillRect(x + 1, y + 1, w - 2, h - 2, bg);
+
+  const int innerW = w - 2;
+  const int innerH = h - 2;
+  if (innerW <= 0 || innerH <= 0) {
+    return;
+  }
+
+  // Bars fill the full available width (no gaps). Distribute remainder pixels.
+  const int baseW = innerW / (int)binCount;
+  const int rem = innerW % (int)binCount;
+  if (baseW <= 0) {
+    return;
+  }
+
+  int bx = x + 1;
+  for (size_t i = 0; i < binCount; ++i) {
+    const int bw = baseW + ((int)i < rem ? 1 : 0);
+    const float v = std::min(100.0f, (float)bins[i]);
+    const int bh = (int)lroundf((v / 100.0f) * (float)innerH);
+    if (bh > 0) {
+      const int by = (y + 1) + (innerH - bh);
+      s.fillRect(bx, by, bw, bh, barColor);
+    }
+    bx += bw;
+  }
+}
+
+static void drawStatusScreen(const char* title, const char* line1, const char* line2, uint16_t accent, const uint8_t* spectrumBins = nullptr, size_t spectrumCount = 0) {
   // Status UI is displayed in landscape.
   setDisplayRotation(kStatusRotation);
   auto& frameSprite = frameSpriteLandscape;
@@ -324,6 +365,15 @@ static void drawStatusScreen(const char* title, const char* line1, const char* l
   frameSprite.drawString(line1 ? line1 : "", 8, 44);
   frameSprite.drawString(line2 ? line2 : "", 8, 60);
 
+  // Optional: spectrum
+  if (spectrumBins != nullptr && spectrumCount > 0) {
+    const int barX = 8;
+    const int barY = 80;
+    const int barW = frameSprite.width() - 16;
+    const int barH = std::max(16, frameSprite.height() - barY - 28);
+    drawSpectrumBarsVertical(frameSprite, barX, barY, barW, barH, spectrumBins, spectrumCount, accent, bgColor);
+  }
+
   // Footer: buffer/mic/speaker quick status
   char footer[96];
   snprintf(footer, sizeof(footer), "Mic:%s  Spk:%s  Buf:%s", M5.Mic.isEnabled() ? "ON" : "OFF", M5.Speaker.isEnabled() ? "ON" : "OFF", gRecPcm ? "OK" : "NO");
@@ -333,6 +383,81 @@ static void drawStatusScreen(const char* title, const char* line1, const char* l
   M5.Display.startWrite();
   frameSprite.pushSprite(&M5.Display, 0, 0);
   M5.Display.endWrite();
+}
+
+static void computeSpectrumFromPcmWindow(const int16_t* pcm, size_t totalSamples, size_t windowEndSample) {
+  if (pcm == nullptr || totalSamples == 0) {
+    return;
+  }
+  if (windowEndSample > totalSamples) {
+    windowEndSample = totalSamples;
+  }
+
+  // Voice-focused centers in Hz (approx. 200..4000 Hz).
+  static constexpr float kCentersHz[kRecSpectrumBins] = {
+    200.0f, 250.0f, 315.0f, 400.0f,
+    500.0f, 630.0f, 800.0f, 1000.0f,
+    1250.0f, 1600.0f, 2000.0f, 2500.0f,
+    2800.0f, 3150.0f, 3550.0f, 4000.0f,
+  };
+  static constexpr size_t kN = 256;
+
+  const size_t N = (windowEndSample >= kN) ? kN : windowEndSample;
+  if (N < 32) {
+    return;
+  }
+  const int16_t* x = pcm + (windowEndSample - N);
+
+  auto window = [&](size_t n) -> float {
+    const float a = 2.0f * PI * (float)n / (float)(N - 1);
+    return 0.5f - 0.5f * cosf(a);
+  };
+
+  float raw[kRecSpectrumBins];
+  for (size_t bi = 0; bi < kRecSpectrumBins; ++bi) {
+    const float f = kCentersHz[bi];
+    int k = (int)lroundf((f * (float)N) / (float)kRecSampleRateHz);
+    if (k < 1) k = 1;
+    if (k > (int)N / 2 - 1) k = (int)N / 2 - 1;
+    const float w = 2.0f * PI * (float)k / (float)N;
+    const float coeff = 2.0f * cosf(w);
+
+    float q0 = 0.0f;
+    float q1 = 0.0f;
+    float q2 = 0.0f;
+    for (size_t n = 0; n < N; ++n) {
+      const float s = ((float)x[n] / 32768.0f) * window(n);
+      q0 = coeff * q1 - q2 + s;
+      q2 = q1;
+      q1 = q0;
+    }
+
+    const float power = (q1 * q1 + q2 * q2 - coeff * q1 * q2);
+    raw[bi] = power;
+  }
+
+  const float fullScaleMag = (float)N * 0.5f;
+  for (size_t i = 0; i < kRecSpectrumBins; ++i) {
+    const float mag = sqrtf(std::max(1e-12f, raw[i]));
+    float a = mag / fullScaleMag;
+    if (a > 1.0f) a = 1.0f;
+    const float db = 20.0f * log10f(std::max(1e-6f, a));
+
+    const float dbMin = -72.0f;
+    const float dbMax = -12.0f;
+    float v = (db - dbMin) / (dbMax - dbMin);
+    if (v < 0.0f) v = 0.0f;
+    if (v > 1.0f) v = 1.0f;
+
+    const float attack = 0.40f;
+    const float decay = 0.92f;
+    float cur = gRecSpectrumSmooth[i];
+    if (v > cur) cur = cur + (v - cur) * attack;
+    else cur = cur * decay;
+    gRecSpectrumSmooth[i] = cur;
+
+    gRecSpectrum[i] = (uint8_t)lroundf(cur * 100.0f);
+  }
 }
 
 struct IMAAdpcmState {
@@ -672,11 +797,17 @@ void loop() {
     } else {
       const uint32_t now = millis();
       if (shouldDrawStatus(now, 100)) {
+        const uint32_t elapsedMs = now - gPlayStartMs;
+        size_t pos = (size_t)(((uint64_t)elapsedMs * (uint64_t)kRecSampleRateHz) / 1000ull);
+        if (pos > gRecSamples) {
+          pos = gRecSamples;
+        }
+        computeSpectrumFromPcmWindow(gRecPcm, gRecSamples, pos);
         char l1[64];
         char l2[64];
         snprintf(l1, sizeof(l1), "samples: %u", (unsigned)gRecSamples);
         snprintf(l2, sizeof(l2), "playing... (release KEY2 = no-op)");
-        drawStatusScreen("PLAY", l1, l2, TFT_GREEN);
+        drawStatusScreen("PLAY", l1, l2, TFT_GREEN, gRecSpectrum, kRecSpectrumBins);
       }
       delay(1);
       return;
@@ -776,10 +907,14 @@ void loop() {
             char l2[64];
             snprintf(l1, sizeof(l1), "REC  %lu.%02lus / %lus", (unsigned long)(elapsed / 1000), (unsigned long)((elapsed % 1000) / 10), (unsigned long)(gRecMaxMs / 1000));
             snprintf(l2, sizeof(l2), "samples: %u   left: %lums", (unsigned)gRecSamples, (unsigned long)remainMs);
-            drawStatusScreen("RECORDING", l1, l2, TFT_RED);
+            drawStatusScreen("RECORDING", l1, l2, TFT_RED, gRecSpectrum, kRecSpectrumBins);
           }
           delay(1);
         }
+
+        // Chunk has finished recording into gRecPcm[gRecSamples..gRecSamples+chunk).
+        // Update spectrum from the recorded audio (avoid reading the buffer mid-write).
+        computeSpectrumFromPcmWindow(gRecPcm + gRecSamples, chunk, chunk);
         gRecSamples += chunk;
       }
       delay(1);
