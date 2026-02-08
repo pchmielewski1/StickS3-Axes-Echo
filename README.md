@@ -53,6 +53,15 @@ Use VS Code commands:
 - `PlatformIO: Monitor`
 - If something gets stuck: `PlatformIO: Clean` then `PlatformIO: Upload`
 
+## Releases (prebuilt binaries)
+
+This repo includes a GitHub Actions workflow that builds firmware binaries and attaches them to a GitHub Release whenever you push a version tag.
+
+- Create a tag like `v0.0.1` and push it:
+  - `git tag v0.0.1`
+  - `git push --tags`
+- After the workflow finishes, download the `.zip` / `.bin` assets from the GitHub Release page.
+
 ## Repo map
 
 - Main firmware: [src/main.cpp](src/main.cpp)

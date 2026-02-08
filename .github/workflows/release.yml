@@ -1,0 +1,65 @@
+name: Release Firmware
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+          key: ${{ runner.os }}-platformio-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build (PlatformIO)
+        run: platformio run -e m5stack-sticks3
+
+      - name: Collect artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          BUILD_DIR=".pio/build/m5stack-sticks3"
+
+          # Collect common ESP32-S3 outputs if present.
+          for f in firmware.bin bootloader.bin partitions.bin boot_app0.bin firmware.elf firmware.map; do
+            if [ -f "$BUILD_DIR/$f" ]; then
+              cp -v "$BUILD_DIR/$f" "dist/$f"
+            fi
+          done
+
+          # Also collect any extra .bin files PlatformIO produced.
+          find "$BUILD_DIR" -maxdepth 1 -type f -name "*.bin" -exec cp -vn {} dist/ \;
+
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+          (cd dist && zip -9 -r "sticks3-axes-echo-${GITHUB_REF_NAME}.zip" .)
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.bin
+            dist/*.elf
+            dist/*.map
+            dist/SHA256SUMS.txt
+            dist/*.zip
+          generate_release_notes: true
