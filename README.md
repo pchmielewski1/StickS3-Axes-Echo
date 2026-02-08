@@ -55,7 +55,10 @@ Use VS Code commands:
 
 ## Releases (prebuilt binaries)
 
-This repo includes a GitHub Actions workflow that builds firmware binaries and attaches them to a GitHub Release whenever you push a version tag.
+This repo includes a GitHub Actions workflow that builds firmware binaries and attaches them to a GitHub Release.
+
+- **Automatic releases:** every push to `main` publishes a new **pre-release** and automatically increments the **patch** version (`vX.Y.Z`).
+- **Manual releases:** you can also publish a normal release by pushing a version tag.
 
 - Create a tag like `v0.0.1` and push it:
   - `git tag v0.0.1`
