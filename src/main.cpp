@@ -173,6 +173,33 @@ static void drawAxesScreen(float ax, float ay, float az) {
   s.drawString(line, 6, 62);
 
   s.setTextColor(TFT_LIGHTGREY, bgColor);
+
+  // Status row: uptime (left) + battery (right).
+  const uint32_t upSec = millis() / 1000u;
+  const uint32_t upMin = upSec / 60u;
+  const uint32_t upHr = upMin / 60u;
+  const uint32_t upDispMin = upMin % 60u;
+  const uint32_t upDispSec = upSec % 60u;
+  char upLine[32];
+  snprintf(upLine, sizeof(upLine), "up %lu:%02lu:%02lu", (unsigned long)upHr, (unsigned long)upDispMin, (unsigned long)upDispSec);
+
+  int batt = (int)M5.Power.getBatteryLevel();
+  const int16_t battMv = M5.Power.getBatteryVoltage();
+  char battLine[24];
+  if (batt < 0 || battMv <= 0) {
+    snprintf(battLine, sizeof(battLine), "bat --%%");
+  } else {
+    if (batt > 100) batt = 100;
+    if (batt < 0) batt = 0;
+    snprintf(battLine, sizeof(battLine), "bat %d%%", batt);
+  }
+
+  s.setTextDatum(top_left);
+  s.drawString(upLine, 6, s.height() - 38);
+  s.setTextDatum(top_right);
+  s.drawString(battLine, s.width() - 6, s.height() - 38);
+
+  s.setTextDatum(top_left);
   s.drawString("KEY1: color   HOLD KEY1: PLAY", 6, s.height() - 26);
   s.drawString("KEY2: hold rec / release play", 6, s.height() - 14);
 
