@@ -230,6 +230,11 @@ static uint8_t gRecSpectrum[kRecSpectrumBins] = {0};
 static float gRecSpectrumSmooth[kRecSpectrumBins] = {0.0f};
 static uint32_t gPlayStartMs = 0;
 
+static bool gRecMetricsValid = false;
+static float gRecRmsDbfs = -99.9f;
+static float gRecPeakDbfs = -99.9f;
+static float gRecClipPercent = 0.0f;
+
 enum class UiMode : uint8_t {
   Normal = 0,
   RecordBeep,
@@ -476,6 +481,58 @@ static void computeSpectrumFromPcmWindow(const int16_t* pcm, size_t totalSamples
 
     gRecSpectrum[i] = (uint8_t)lroundf(cur * 100.0f);
   }
+}
+
+static void computeAudioMetricsFromPcmWindow(const int16_t* pcm, size_t totalSamples, size_t windowEndSample) {
+  if (pcm == nullptr || totalSamples == 0) {
+    gRecMetricsValid = false;
+    return;
+  }
+  if (windowEndSample > totalSamples) {
+    windowEndSample = totalSamples;
+  }
+
+  static constexpr size_t kN = 256;
+  const size_t N = (windowEndSample >= kN) ? kN : windowEndSample;
+  if (N < 32) {
+    gRecMetricsValid = false;
+    return;
+  }
+
+  const int16_t* x = pcm + (windowEndSample - N);
+
+  static constexpr int kClipThreshold = 32760;
+  uint32_t clipped = 0;
+  int peak = 0;
+  double sumsq = 0.0;
+
+  for (size_t n = 0; n < N; ++n) {
+    const int v = (int)x[n];
+    const int a = (v < 0) ? -v : v;
+    if (a > peak) {
+      peak = a;
+    }
+    if (a >= kClipThreshold) {
+      ++clipped;
+    }
+    sumsq += (double)v * (double)v;
+  }
+
+  const double rms = sqrt(sumsq / (double)N);
+  const float rmsNorm = (float)(rms / 32768.0);
+  const float peakNorm = (float)peak / 32768.0f;
+
+  auto toDbfs = [](float norm) -> float {
+    if (norm <= 0.0f) {
+      return -99.9f;
+    }
+    return 20.0f * log10f(norm);
+  };
+
+  gRecRmsDbfs = toDbfs(rmsNorm);
+  gRecPeakDbfs = toDbfs(peakNorm);
+  gRecClipPercent = 100.0f * ((float)clipped / (float)N);
+  gRecMetricsValid = true;
 }
 
 struct IMAAdpcmState {
@@ -805,10 +862,15 @@ void loop() {
           pos = gRecSamples;
         }
         computeSpectrumFromPcmWindow(gRecPcm, gRecSamples, pos);
+        computeAudioMetricsFromPcmWindow(gRecPcm, gRecSamples, pos);
         char l1[64];
         char l2[64];
-        snprintf(l1, sizeof(l1), "samples: %u", (unsigned)gRecSamples);
-        snprintf(l2, sizeof(l2), "playing... (release KEY2 = no-op)");
+        snprintf(l1, sizeof(l1), "playing... pos:%u/%u", (unsigned)pos, (unsigned)gRecSamples);
+        if (gRecMetricsValid) {
+          snprintf(l2, sizeof(l2), "RMS % .1f dBFS  PEAK % .1f dBFS  CLIP %0.1f%%", gRecRmsDbfs, gRecPeakDbfs, gRecClipPercent);
+        } else {
+          snprintf(l2, sizeof(l2), "RMS -- dBFS  PEAK -- dBFS  CLIP --%%");
+        }
         drawStatusScreen("PLAY", l1, l2, TFT_GREEN, gRecSpectrum, kRecSpectrumBins);
       }
       delay(1);
@@ -907,8 +969,12 @@ void loop() {
             const uint32_t remainMs = (elapsed >= gRecMaxMs) ? 0 : (gRecMaxMs - elapsed);
             char l1[64];
             char l2[64];
-            snprintf(l1, sizeof(l1), "REC  %lu.%02lus / %lus", (unsigned long)(elapsed / 1000), (unsigned long)((elapsed % 1000) / 10), (unsigned long)(gRecMaxMs / 1000));
-            snprintf(l2, sizeof(l2), "samples: %u   left: %lums", (unsigned)gRecSamples, (unsigned long)remainMs);
+            snprintf(l1, sizeof(l1), "REC  %lu.%02lus / %lus  samp:%u  left:%lums", (unsigned long)(elapsed / 1000), (unsigned long)((elapsed % 1000) / 10), (unsigned long)(gRecMaxMs / 1000), (unsigned)gRecSamples, (unsigned long)remainMs);
+            if (gRecMetricsValid) {
+              snprintf(l2, sizeof(l2), "RMS % .1f dBFS  PEAK % .1f dBFS  CLIP %0.1f%%", gRecRmsDbfs, gRecPeakDbfs, gRecClipPercent);
+            } else {
+              snprintf(l2, sizeof(l2), "RMS -- dBFS  PEAK -- dBFS  CLIP --%%");
+            }
             drawStatusScreen("RECORDING", l1, l2, TFT_RED, gRecSpectrum, kRecSpectrumBins);
           }
           delay(1);
@@ -917,6 +983,7 @@ void loop() {
         // Chunk has finished recording into gRecPcm[gRecSamples..gRecSamples+chunk).
         // Update spectrum from the recorded audio (avoid reading the buffer mid-write).
         computeSpectrumFromPcmWindow(gRecPcm + gRecSamples, chunk, chunk);
+        computeAudioMetricsFromPcmWindow(gRecPcm + gRecSamples, chunk, chunk);
         gRecSamples += chunk;
       }
       delay(1);
