@@ -27,6 +27,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -91,12 +92,33 @@ jobs:
           echo "last_tag=${LAST_TAG}" >> "$GITHUB_OUTPUT"
           echo "prerelease=true" >> "$GITHUB_OUTPUT"
 
+      - name: Create and push tag (main pushes)
+        if: ${{ steps.ver.outputs.prerelease == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ver.outputs.tag }}"
+
+          # Create an actual git tag so the version history is real and
+          # future runs can reliably discover the latest version.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "Tag ${TAG} already exists"
+            exit 0
+          fi
+
+          git tag "${TAG}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${TAG}"
+
       - name: Build (PlatformIO)
         run: platformio run -e m5stack-sticks3
 
       - name: Collect artifacts
         run: |
           set -euo pipefail
+          TAG="${{ steps.ver.outputs.tag }}"
           mkdir -p dist
           BUILD_DIR=".pio/build/m5stack-sticks3"
 
@@ -111,7 +133,7 @@ jobs:
           find "$BUILD_DIR" -maxdepth 1 -type f -name "*.bin" -exec cp -vn {} dist/ \;
 
           (cd dist && sha256sum * > SHA256SUMS.txt)
-          (cd dist && zip -9 -r "sticks3-axes-echo-${GITHUB_REF_NAME}.zip" .)
+          (cd dist && zip -9 -r "sticks3-axes-echo-${TAG}.zip" .)
 
       - name: Prepare release notes
         run: |
@@ -149,6 +171,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           prerelease: ${{ steps.ver.outputs.prerelease }}
           files: |
             dist/*.bin
