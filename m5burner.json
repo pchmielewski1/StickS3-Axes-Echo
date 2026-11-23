@@ -1,0 +1,20 @@
+{
+  "name": "StickS3 Axes & Echo",
+  "description": "A tiny dictaphone and motion viewer for StickS3. Hold KEY2 to record from the built-in mic (up to several seconds in PSRAM), release to play back through the speaker — with live spectrum, RMS/PEAK/CLIP meters, and safe ES8311 mic↔speaker switching. Between recordings, the portrait UI shows IMU accelerometer axes X/Y/Z and the acceleration vector. KEY1 cycles the background color; hold KEY1 to replay the last clip.\n\nScreenshots (repo):\n- images/recording.png — RECORD status\n- images/play.png — PLAY status\n- images/normal.png — IMU axes (black background)",
+  "keywords": "StickS3, dictaphone, recorder, microphone, speaker, IMU, accelerometer, axes, spectrum",
+  "author": "pchmielewski1",
+  "repository": "https://github.com/pchmielewski1/StickS3-Axes-Echo",
+  "cover": "images/recording.png",
+  "images": [
+    "images/recording.png",
+    "images/play.png",
+    "images/normal.png"
+  ],
+  "firmware_category": {
+    "path": "firmware",
+    "device": ["StickS3"],
+    "default_baud": 921600
+  },
+  "version": "0.0.4",
+  "framework": "Arduino IDE"
+}

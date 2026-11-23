@@ -3,6 +3,39 @@
 
 #include <vector>
 
+// --- Screenshot bridge (debug-only, enabled with -DS3_SCREENSHOT_BRIDGE) ---
+// Dumps the RGB565 framebuffer as base64 on USB CDC so host tooling
+// (tools/frame_to_png.py) rebuilds PNGs. Compiled OUT of release builds.
+#ifdef S3_SCREENSHOT_BRIDGE
+#include <base64.h>
+static uint32_t gLastShotMs = 0;
+// Returns true when a frame was actually dumped (throttle / errors => false).
+static bool s3DumpFrame(const char* tag, const lgfx::LGFX_Sprite& s) {
+  const uint32_t now = millis();
+  if (now - gLastShotMs < 1800) {
+    return false;
+  }
+  gLastShotMs = now;
+  const uint16_t w = s.width();
+  const uint16_t h = s.height();
+  const uint8_t* px = (const uint8_t*)s.getBuffer();
+  if (px == nullptr || w == 0 || h == 0) {
+    return false;
+  }
+  const size_t bytes = (size_t)w * h * 2;  // RGB565, little-endian
+  const String b64 = base64::encode(px, bytes);
+  Serial.printf("\nS3SHOT_BEGIN %s %u %u %u\n", tag, (unsigned)w, (unsigned)h, (unsigned)bytes);
+  for (size_t i = 0; i < b64.length(); i += 76) {
+    Serial.println(b64.substring(i, i + 76));
+  }
+  Serial.printf("S3SHOT_END %s\n", tag);
+  Serial.flush();
+  return true;
+}
+#else
+#define s3DumpFrame(tag, s) ((void)0)
+#endif
+
 static constexpr uint16_t kBgPalette16[] = {
   TFT_BLACK,
   TFT_NAVY,
@@ -206,6 +239,20 @@ static void drawAxesScreen(float ax, float ay, float az) {
   M5.Display.startWrite();
   s.pushSprite(&M5.Display, 0, 0);
   M5.Display.endWrite();
+#ifdef S3_SCREENSHOT_BRIDGE
+  // Tag includes palette index so host capture can keep every KEY1 background.
+  {
+    char tag[24];
+    snprintf(tag, sizeof(tag), "normal_%02u", (unsigned)bgIndex);
+    if (s3DumpFrame(tag, s)) {
+      // Same as KEY1 click — agent cannot press the button.
+      bgIndex = static_cast<uint8_t>((bgIndex + 1) % kBgPaletteCount);
+      bgColor = kBgPalette16[bgIndex];
+    }
+  }
+#else
+  s3DumpFrame("normal", s);
+#endif
 }
 
 // --- Audio record/playback (KEY2 = M5.BtnB) ---
@@ -406,6 +453,7 @@ static void drawStatusScreen(const char* title, const char* line1, const char* l
   M5.Display.startWrite();
   frameSprite.pushSprite(&M5.Display, 0, 0);
   M5.Display.endWrite();
+  s3DumpFrame(title ? title : "status", frameSprite);
 }
 
 static void computeSpectrumFromPcmWindow(const int16_t* pcm, size_t totalSamples, size_t windowEndSample) {

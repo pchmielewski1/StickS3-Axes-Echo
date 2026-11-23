@@ -2,6 +2,13 @@
 .pio/
 .pioenvs/
 .piolibdeps/
+.platformio/
+.pio-venv/
+
+## Local scratch / capture logs
+.scratch/
+capture.log
+*.capture.log
 
 ## VS Code (lokalne ustawienia / cache)
 .vscode/
